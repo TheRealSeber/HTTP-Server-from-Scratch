@@ -1,9 +1,15 @@
 use super::ParseError::{self, InvalidHeaders};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Header<'buf> {
-    name: &'buf str,
-    value: &'buf str,
+    header: HashMap<&'buf str, Value<'buf>>,
+}
+
+#[derive(Debug)]
+pub enum Value<'buf> {
+    Single(&'buf str),
+    Multiple(Vec<&'buf str>),
 }
 
 #[derive(Debug)]
@@ -17,14 +23,18 @@ impl<'buf> Headers<'buf> {
     fn get_header_by_name(&self, name: &'buf str) -> Option<&Header<'buf>> {
         self.headers
             .iter()
-            .filter(|&header| header.name == name)
+            .filter(|&header_obj| header_obj.header.contains_key(name))
             .next()
     }
 
     pub fn validate_required_headers(&self) -> Result<(), ParseError> {
         for (req_name, exp_value) in Self::REQUIRED_HEADERS {
-            if let Some(header) = self.get_header_by_name(req_name) {
-                match header.value.contains(exp_value) {
+            if let Some(header_obj) = self.get_header_by_name(req_name) {
+                match header_obj
+                    .header
+                    .values()
+                    .any(|value| value.contains(exp_value))
+                {
                     true => (),
                     false => return Err(InvalidHeaders),
                 }
@@ -50,8 +60,31 @@ impl<'buf> From<&'buf str> for Headers<'buf> {
 
 impl<'buf> From<&'buf str> for Header<'buf> {
     fn from(header: &'buf str) -> Self {
+        let mut data = HashMap::new();
+
         let (key, value) = header.split_once(": ").unwrap();
         let name = key.trim_start_matches("\n");
-        Self { name, value }
+
+        for value in value.split(";") {
+            data.entry(name)
+                .and_modify(|e| match e {
+                    Value::Single(prev_value) => {
+                        *e = Value::Multiple(vec![prev_value, value]);
+                    }
+                    Value::Multiple(values) => values.push(value),
+                })
+                .or_insert(Value::Single(value));
+        }
+
+        Self { header: data }
+    }
+}
+
+impl<'buf> Value<'buf> {
+    pub fn contains(&self, exp_value: &'buf str) -> bool {
+        match self {
+            Self::Single(value) => value.contains(&exp_value),
+            Self::Multiple(values) => values.iter().any(|&value| value.contains(&exp_value)),
+        }
     }
 }
