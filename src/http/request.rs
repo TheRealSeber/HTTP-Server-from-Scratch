@@ -1,4 +1,5 @@
 use super::method::{Method, MethodError};
+use super::Headers;
 use super::QueryString;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -10,6 +11,7 @@ pub struct Request<'buf> {
     path: &'buf str,
     query_string: Option<QueryString<'buf>>,
     method: Method,
+    headers: Headers<'buf>,
 }
 
 impl<'buf> Request<'buf> {
@@ -36,7 +38,11 @@ impl<'buf> TryFrom<&'buf [u8]> for Request<'buf> {
         let request = str::from_utf8(buf).or(Err(ParseError::InvalidEncoding))?;
         let (method, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
         let (mut path, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
-        let (protocol, _) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
+        let (protocol, request) = get_next_word(request).ok_or(ParseError::InvalidRequest)?;
+
+        let headers = Headers::from(request);
+
+        headers.validate_required_headers()?;
 
         if protocol != "HTTP/1.1" {
             return Err(ParseError::InvalidProtocol);
@@ -53,8 +59,9 @@ impl<'buf> TryFrom<&'buf [u8]> for Request<'buf> {
 
         Ok(Self {
             path,
-            query_string: query_string.map(|qs| qs),
+            query_string,
             method,
+            headers,
         })
     }
 }
@@ -74,6 +81,7 @@ pub enum ParseError {
     InvalidEncoding,
     InvalidProtocol,
     InvalidMethod,
+    InvalidHeaders,
 }
 
 impl ParseError {
@@ -83,6 +91,7 @@ impl ParseError {
             Self::InvalidEncoding => "Invalid encoding",
             Self::InvalidProtocol => "Invalid protocol",
             Self::InvalidMethod => "Invalid method",
+            Self::InvalidHeaders => "Invalid headers",
         }
     }
 }

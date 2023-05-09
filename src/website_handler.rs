@@ -15,7 +15,7 @@ impl WebsiteHandler {
 
         match fs::canonicalize(path) {
             Ok(path) => {
-                if path.starts_with(&self.public_path) {
+                if path.to_str().unwrap().contains(&self.public_path) {
                     fs::read_to_string(path).ok()
                 } else {
                     println!("Directory traversal attack attempted: {}", file_path);
